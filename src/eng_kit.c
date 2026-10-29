@@ -14,16 +14,15 @@
 static const char *const N_KIT_TYPE[] = {"BD", "SD", "CH", "OH", "CP", "RIM", "HTOM", "LTOM"};
 enum { K_BD, K_SD, K_CH, K_OH, K_CP, K_RIM, K_HTOM, K_LTOM };
 
-static const uint8_t KIT_BASE[8] = {33, 50, 80, 80, 60, 76, 55, 45};      /* base MIDI note */
+static const uint8_t KIT_BASE[8] = {33, 50, 56, 56, 60, 76, 55, 45};      /* base MIDI note */
 static const uint8_t KIT_TAU[8] = {40, 24, 6, 60, 20, 4, 36, 36};         /* blocks at DECAY 0 */
 static const uint8_t KIT_PE[8] = {24, 8, 0, 0, 0, 4, 12, 12};            /* default pitch drop scale, 1/8 */
 
 static void kit_note_on(struct track *t, voice_t *v)
 {
     uint32_t seed = ((uint32_t)v->note * 2654435761u) ^ (v->age * 40503u) ^ 0x9E3779B9u;
-    (void)t;
     v->s[0] = 1 << 24;
-    v->s[1] = 32767;
+    v->s[1] = (t->p[P_E0] == K_CH || t->p[P_E0] == K_OH) ? 0 : 32767;
     v->s[2] = (int32_t)(seed ? seed : 1u);
     v->s[3] = ((int32_t)t->p[P_E7] * 40) / 127;
     v->s[4] = v->s[5] = v->s[6] = 0;
@@ -35,9 +34,11 @@ static int32_t kit_amp(struct track *t, voice_t *v, int32_t adsr)
 {
     int32_t ty = clamp(t->p[P_E0], 0, 7), dc = clamp(t->p[P_E2], 0, 127), tau, a;
     (void)adsr;
-    v->s[5]++;
+    if (ty == K_CP)
+        v->s[5]++;                                       /* (CH / OH keep s[5] as an oscillator phase) */
     v->s[7] -= v->s[7] >> 2;
-    v->s[1] -= v->s[1] >> 3;
+    if (ty != K_CH && ty != K_OH)
+        v->s[1] -= v->s[1] >> 3;                         /* pitch envelope (hats use s[1] as a filter state) */
     if (v->s[3] > 0) {
         v->s[3]--;
     } else {
@@ -77,15 +78,25 @@ static void kit_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, co
             y = mulq15(sine_i(v->ph[0]), g_t) + mulq15(hp, g_n);
             break;
         case K_CH:
-        case K_OH:
-            v->ph[1] += inc + (inc >> 1);
-            v->ph[2] += inc * 2u + (inc >> 1);
-            y = (((v->ph[0] >> 31) ? 10922 : -10922) + ((v->ph[1] >> 31) ? 10922 : -10922) +
-                 ((v->ph[2] >> 31) ? 10922 : -10922));
-            y = mulq15(y, g_t) + mulq15(nz, g_n);
-            lp = v->s[4] += mulq15(y - v->s[4], 20000);
-            y -= lp;
+        case K_OH: {                                     /* five inharmonic band-limited squares (808 ratios), 2 x HP */
+            uint32_t p5 = (uint32_t)v->s[5], p6 = (uint32_t)v->s[6];
+            int32_t hp1;
+            v->ph[1] += (inc >> 8) * 380u;
+            v->ph[2] += (inc >> 8) * 461u;
+            p5 += (inc >> 8) * 652u;
+            p6 += (inc >> 8) * 998u;
+            y = osc_pulse(v->ph[0], inc, 0x80000000u) + osc_pulse(v->ph[1], (inc >> 8) * 380u, 0x80000000u) +
+                osc_pulse(v->ph[2], (inc >> 8) * 461u, 0x80000000u) + osc_pulse(p5, (inc >> 8) * 652u, 0x80000000u) +
+                osc_pulse(p6, (inc >> 8) * 998u, 0x80000000u);
+            v->s[5] = (int32_t)p5;
+            v->s[6] = (int32_t)p6;
+            y = mulq15(y >> 2, g_t) + mulq15(nz, g_n);
+            lp = v->s[4] += mulq15(y - v->s[4], 14000);   /* 12 dB/oct high-pass near 5 kHz */
+            hp1 = y - lp;
+            lp = v->s[1] += mulq15(hp1 - v->s[1], 14000);  /* second pole (s[1]: hats have no pitch envelope) */
+            y = hp1 - lp;
             break;
+        }
         case K_CP:
             lp = v->s[4] += mulq15(nz - v->s[4], 7000);
             hp = nz - lp;
@@ -109,7 +120,7 @@ static void kit_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, co
     {nm, {ty, tn, dc, pe, to, dr, sn, ho}, {0, 60, 127, 60}, 0, 0, FX(0, 0, 0, 0), PAT(0)}
 static const preset_t KIT_PRESETS[] = {
     KP("BD", K_BD, 0, 50, 80, 0, 20, 30, 0),   KP("SD", K_SD, 0, 40, 20, 70, 10, 20, 0),
-    KP("CH", K_CH, 0, 20, 0, 40, 0, 0, 0),     KP("OH", K_OH, 0, 70, 0, 40, 0, 0, 0),
+    KP("CH", K_CH, 0, 20, 0, 20, 0, 0, 0),     KP("OH", K_OH, 0, 70, 0, 20, 0, 0, 0),
     KP("CP", K_CP, 0, 50, 0, 0, 0, 0, 0),      KP("RIM", K_RIM, 0, 20, 20, 0, 0, 30, 0),
     KP("HTOM", K_HTOM, 0, 55, 60, 0, 0, 10, 0), KP("LTOM", K_LTOM, 0, 60, 60, 0, 0, 10, 0),
 };
