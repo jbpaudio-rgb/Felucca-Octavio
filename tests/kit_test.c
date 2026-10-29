@@ -55,6 +55,7 @@ int main(void)
     for (n = 0; n < 40000; n++) {
         int32_t peak, zc, len;
         for (k = 0; k < 8; k++) t->p[P_E0 + k] = (int16_t)(rnd() % 128);
+        t->p[P_E1] = (int16_t)((int32_t)(rnd() % 128) - 64);
         t->p[P_E0] = n % 8;
         if (n < 8) { for (k = 1; k < 8; k++) t->p[P_E0 + k] = ENG_KIT.edit[k].def; t->p[P_E7] = 0; }
         len = hit(t, &peak, &zc);

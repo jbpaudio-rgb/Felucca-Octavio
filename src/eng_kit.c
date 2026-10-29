@@ -60,7 +60,7 @@ static int32_t kit_amp(struct track *t, voice_t *v, int32_t adsr)
 static void kit_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     int32_t ty = clamp(t->p[P_E0], 0, 7), tone = clamp(t->p[P_E4], 0, 127), drive = clamp(t->p[P_E5], 0, 127);
-    int32_t snap = clamp(t->p[P_E6], 0, 127), tune = ((clamp(t->p[P_E1], 0, 127) - 64) * 24 * 16) / 64;
+    int32_t snap = clamp(t->p[P_E6], 0, 127), tune = (clamp(t->p[P_E1], -64, 63) * 24 * 16) / 64;
     int32_t pe = (((v->s[1] * clamp(t->p[P_E3], 0, 127)) >> 7) * (KIT_PE[ty] * 768 / 24)) >> 15;
     int32_t p16 = (int32_t)KIT_BASE[ty] * 16 + tune + pe, gain = 32768 + drive * 2048, sng;
     uint32_t inc = pitch_inc((uint32_t)clamp(p16, 0, 2047)), i;
@@ -108,10 +108,10 @@ static void kit_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, co
 #define KP(nm, ty, tn, dc, pe, to, dr, sn, ho) \
     {nm, {ty, tn, dc, pe, to, dr, sn, ho}, {0, 60, 127, 60}, 0, 0, FX(0, 0, 0, 0), PAT(0)}
 static const preset_t KIT_PRESETS[] = {
-    KP("BD", K_BD, 64, 50, 80, 0, 20, 30, 0),   KP("SD", K_SD, 64, 40, 20, 70, 10, 20, 0),
-    KP("CH", K_CH, 64, 20, 0, 40, 0, 0, 0),     KP("OH", K_OH, 64, 70, 0, 40, 0, 0, 0),
-    KP("CP", K_CP, 64, 50, 0, 0, 0, 0, 0),      KP("RIM", K_RIM, 64, 20, 20, 0, 0, 30, 0),
-    KP("HTOM", K_HTOM, 64, 55, 60, 0, 0, 10, 0), KP("LTOM", K_LTOM, 64, 60, 60, 0, 0, 10, 0),
+    KP("BD", K_BD, 0, 50, 80, 0, 20, 30, 0),   KP("SD", K_SD, 0, 40, 20, 70, 10, 20, 0),
+    KP("CH", K_CH, 0, 20, 0, 40, 0, 0, 0),     KP("OH", K_OH, 0, 70, 0, 40, 0, 0, 0),
+    KP("CP", K_CP, 0, 50, 0, 0, 0, 0, 0),      KP("RIM", K_RIM, 0, 20, 20, 0, 0, 30, 0),
+    KP("HTOM", K_HTOM, 0, 55, 60, 0, 0, 10, 0), KP("LTOM", K_LTOM, 0, 60, 60, 0, 0, 10, 0),
 };
 
 static const engine_t ENG_KIT = {
@@ -119,7 +119,7 @@ static const engine_t ENG_KIT = {
     .page_title = {"VOICE", "SHAPE"},
     .edit = {
         {"TYPE", F_ENUM, 0, 7, 0, N_KIT_TYPE, 0},
-        {"TUNE", F_BIPCT, 0, 127, 64, 0, 0},
+        {"TUNE", F_BIPCT, -64, 63, 0, 0, 0},
         {"DECAY", F_PCT, 0, 127, 64, 0, 0},
         {"PENV", F_PCT, 0, 127, 64, 0, 0},
         {"TONE", F_PCT, 0, 127, 64, 0, 0},
