@@ -11,6 +11,14 @@
  *
  * State: s[0] level (Q24), s[1] pitch env (Q15), s[2] noise generator, s[3] hold blocks left,
  * s[4] / s[6] one-pole states, s[5] blocks since the hit, s[7] snap env (Q15); ph[0..2] oscillators. */
+/* The mixer: six lanes. The host may provide KIT_LANE_LEVEL(t, lane) (0..127, 127 = as designed, square law) from
+ * parameters of its own; without it every lane plays at 100 %. Lanes: 0 BD, 1 SD + RIM, 2 CP, 3 CH + OH,
+ * 4 HTOM + LTOM, 5 CRSH + RIDE + COWB + CLAV */
+#ifndef KIT_LANE_LEVEL
+#define KIT_LANE_LEVEL(t, lane) 127
+#endif
+static const uint8_t KIT_LANE[12] = {0, 1, 3, 3, 2, 1, 4, 4, 5, 5, 5, 5};   /* by type: BD SD CH OH CP RIM HTOM LTOM CRSH RIDE COWB CLAV */
+
 static const char *const N_KIT_TYPE[] = {"BD", "SD", "CH", "OH", "CP", "RIM", "HTOM", "LTOM", "CRSH", "RIDE", "COWB", "CLAV", "KIT"};
 enum { K_BD, K_SD, K_CH, K_OH, K_CP, K_RIM, K_HTOM, K_LTOM, K_CRASH, K_RIDE, K_COW, K_CLAVE, K_NTYPE, K_KITMODE = K_NTYPE };
 #define KIT_METAL(ty) ((ty) == K_CH || (ty) == K_OH || (ty) == K_CRASH || (ty) == K_RIDE)   /* the five-square voices */
@@ -115,6 +123,7 @@ static void kit_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, co
     uint32_t inc = pitch_inc((uint32_t)clamp(p16, 0, 2047)), i;
     int32_t g_t = (127 - tone) << 8, g_n = tone << 8;
     int32_t *rng = &v->s[2];
+    int32_t lv = clamp(KIT_LANE_LEVEL(t, KIT_LANE[ty]), 0, 127), lane_g = (lv * lv * 32768) / (127 * 127);
     sng = mulq15(v->s[7], snap << 8);
     for (i = 0; i < n; i++) {
         int32_t y, nz = (int32_t)(noise32(rng) >> 16) - 32768, lp, hp;
@@ -171,6 +180,7 @@ static void kit_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, co
         }
         y += mulq15(nz, sng) >> 1;
         y = softclip(mul_wrap(clamp(y, -32767, 32767), gain >> 4) >> 11);
+        y = mulq15(y, lane_g);
         out[i] += voice_amp(y, m, i);
     }
 }

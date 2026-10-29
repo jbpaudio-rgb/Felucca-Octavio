@@ -15,6 +15,8 @@ enum { P_ATK, P_REL, P_FTYPE, P_E0, P_E1, P_E2, P_E3, P_E4, P_E5, P_E6, P_E7, P_
 typedef struct track { int16_t p[P_COUNT]; voice_t v[NVOICE]; } track_t;
 static track_t trk[NPART];
 #include "../src/dsp.c"
+static int32_t lane_lv = 127;
+#define KIT_LANE_LEVEL(t, lane) lane_lv
 #include "../src/eng_kit.c"
 
 static uint32_t rs = 12345;
@@ -87,6 +89,18 @@ int main(void)
         if (t->v[0].active || !t->v[1].active) { bad++; printf("choke failed\n"); } else printf("choke: CH cut the OH\n");
         e0 = ENG_KIT.keys(t, 0) * 1000 + ENG_KIT.keys(t, 5); if (e0 != 36046) { bad++; printf("keys map wrong %d\n", e0); }
         t->p[P_E0] = K_BD; if (ENG_KIT.keys(t, 0) != -1) { bad++; printf("keys must be -1 on a fixed type\n"); }
+    }
+    /* the mixer: a lane at 0 is silent, at 64 about 1/4 of the power (square law) */
+    {
+        int32_t pk100, pk0, i, nn; voice_t *v = &t->v[0];
+        (void)i; (void)nn;
+        for (k = 1; k < 8; k++) t->p[P_E0 + k] = ENG_KIT.edit[k].def;
+        t->p[P_E0] = K_BD; t->p[P_E7] = 0;
+        lane_lv = 127; (void)hit(t, &pk100, &i);
+        lane_lv = 0; (void)hit(t, &pk0, &i);
+        lane_lv = 127; (void)v;
+        printf("mixer: BD peak %d at 100%%, %d at 0%%\n", pk100, pk0);
+        if (pk0 != 0 || pk100 < 1000) { bad++; printf("mixer lane level failed\n"); }
     }
     /* cost: 8 voices of the dearest type for 1 s */
     {
