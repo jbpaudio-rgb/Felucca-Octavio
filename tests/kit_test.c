@@ -72,8 +72,9 @@ int main(void)
     {
         static const uint8_t GM[8] = {36, 38, 46, 49, 51, 56, 41, 75};
         int32_t out[CTL]; int b, j, alive = 0, e0;
-        for (k = 1; k < 8; k++) t->p[P_E0 + k] = ENG_KIT.edit[k].def;
-        t->p[P_E0] = K_KITMODE; t->p[P_E5] = 100; t->p[P_E7] = 0;
+        t->p[P_E0] = K_KITMODE;
+        for (k = 1; k < 8; k++) t->p[P_E0 + k] = ENG_KIT.desc(t, k) ? ENG_KIT.desc(t, k)->def : 0;
+        t->p[P_E7] = 0;
         memset(t->v, 0, sizeof t->v);
         for (j = 0; j < 8; j++) { voice_t *v = &t->v[j]; v->note = GM[j]; v->active = 1; v->stage = 1; v->age = j + 1; ENG_KIT.note_on(t, v); }
         for (b = 0; b < 200; b++) for (j = 0; j < 8; j++) {

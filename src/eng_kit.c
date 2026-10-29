@@ -39,18 +39,50 @@ static const int8_t KIT_GM[47][2] = {
     {K_CH, -2}, {K_CH, -4}, {K_RIM, 2}, {K_RIM, -2}, {K_CLAVE, 6}, {K_CLAVE, -6},      /* 71 .. 76 */
     {K_CLAVE, 8}, {K_COW, 2}, {K_RIM, 4}, {K_RIM, -4}, {K_COW, -2},                    /* 77 .. 81 */
 };
+/* TYPE = KIT: six lanes (the mixer's), each playing the drum its EDIT knob picks (E1..E6 = lanes 1..6, E7 = DRIVE).
+ * Lane k plays the notes of its group; while it keeps its own drum (LANE_DEF) the note decides the variant (a GM
+ * open hat on the hats' lane), once the drum is changed the lane plays that drum for all its notes */
+static const uint8_t KIT_LANE_DEF[6] = {K_BD, K_SD, K_CP, K_CH, K_HTOM, K_CRASH};
+static const param_desc_t KIT_LT_DESC[6] = {
+    {"LN1", F_ENUM, 0, K_NTYPE - 1, K_BD, N_KIT_TYPE, 0}, {"LN2", F_ENUM, 0, K_NTYPE - 1, K_SD, N_KIT_TYPE, 0},
+    {"LN3", F_ENUM, 0, K_NTYPE - 1, K_CP, N_KIT_TYPE, 0}, {"LN4", F_ENUM, 0, K_NTYPE - 1, K_CH, N_KIT_TYPE, 0},
+    {"LN5", F_ENUM, 0, K_NTYPE - 1, K_HTOM, N_KIT_TYPE, 0}, {"LN6", F_ENUM, 0, K_NTYPE - 1, K_CRASH, N_KIT_TYPE, 0},
+};
+static const param_desc_t KIT_DRV_DESC = {"DRIVE", F_PCT, 0, 127, 0, 0, 0};
+static const param_desc_t *kit_desc(const struct track *t, uint32_t k)
+{
+    if (clamp(t->p[P_E0], 0, K_KITMODE) != K_KITMODE)
+        return 0;
+    return k >= 1u && k <= 6u ? &KIT_LT_DESC[k - 1u] : k == 7u ? &KIT_DRV_DESC : 0;
+}
+typedef struct { int32_t tune, dc, pe, tone, drive, snap, hold; } kit_p_t;
+static void kit_pp(const struct track *t, kit_p_t *q)        /* the sound's values: the knobs, or fixed ones in KIT mode */
+{
+    if (clamp(t->p[P_E0], 0, K_KITMODE) == K_KITMODE) {
+        q->tune = 0; q->dc = 50; q->pe = 64; q->tone = 30; q->drive = clamp(t->p[P_E7], 0, 127); q->snap = 10; q->hold = 0;
+        return;
+    }
+    q->tune = clamp(t->p[P_E1], -64, 63); q->dc = clamp(t->p[P_E2], 0, 127); q->pe = clamp(t->p[P_E3], 0, 127);
+    q->tone = clamp(t->p[P_E4], 0, 127); q->drive = clamp(t->p[P_E5], 0, 127); q->snap = clamp(t->p[P_E6], 0, 127);
+    q->hold = clamp(t->p[P_E7], 0, 127);
+}
+
 /* the drum a voice plays and its tuning offset (semitones) */
 static int32_t kit_ty(const struct track *t, const voice_t *v, int32_t *semi)
 {
-    int32_t ty = clamp(t->p[P_E0], 0, K_KITMODE), n = v->note;
+    int32_t ty = clamp(t->p[P_E0], 0, K_KITMODE), n = v->note, nt, lane, sel;
     *semi = 0;
     if (ty < K_KITMODE)
         return ty;
     if (n >= 35 && n <= 81) {
         *semi = KIT_GM[n - 35][1];
-        return KIT_GM[n - 35][0];
+        nt = KIT_GM[n - 35][0];
+    } else {
+        nt = n % 12;                                     /* the 12 types over the octave */
     }
-    return (n % 12);                                     /* the 12 types over the octave */
+    lane = KIT_LANE[nt];
+    sel = clamp(t->p[P_E1 + lane], 0, K_NTYPE - 1);
+    return sel == KIT_LANE_DEF[lane] ? nt : sel;
 }
 
 /* the keys, when TYPE = KIT: key k plays the drum k % 12 of this order (the notes: BD RIM SD CP CH OH LTOM HTOM CRSH RIDE COWB CLAV) */
@@ -63,6 +95,7 @@ static int32_t kit_keys(const struct track *t, uint32_t k)
 static void kit_note_on(struct track *t, voice_t *v)
 {
     int32_t semi, j;
+    kit_p_t q;
     uint32_t seed = ((uint32_t)v->note * 2654435761u) ^ (v->age * 40503u) ^ 0x9E3779B9u;
     v->s[0] = 1 << 24;
     j = kit_ty(t, v, &semi);
@@ -80,7 +113,8 @@ static void kit_note_on(struct track *t, voice_t *v)
         }
     }
     v->s[2] = (int32_t)(seed ? seed : 1u);
-    v->s[3] = ((int32_t)t->p[P_E7] * 40) / 127;
+    kit_pp(t, &q);
+    v->s[3] = (q.hold * 40) / 127;
     v->s[4] = v->s[5] = v->s[6] = 0;
     v->s[7] = 32767;
     v->ph[0] = v->ph[1] = v->ph[2] = 0;
@@ -88,7 +122,10 @@ static void kit_note_on(struct track *t, voice_t *v)
 
 static int32_t kit_amp(struct track *t, voice_t *v, int32_t adsr)
 {
-    int32_t semi, ty = kit_ty(t, v, &semi), dc = clamp(t->p[P_E2], 0, 127), tau, a;
+    int32_t semi, ty = kit_ty(t, v, &semi), dc, tau, a;
+    kit_p_t q;
+    kit_pp(t, &q);
+    dc = q.dc;
     (void)adsr;
     if (ty == K_CP)
         v->s[5]++;                                       /* (CH / OH keep s[5] as an oscillator phase) */
@@ -116,9 +153,11 @@ static int32_t kit_amp(struct track *t, voice_t *v, int32_t adsr)
 
 static void kit_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
-    int32_t semi, ty = kit_ty(t, v, &semi), tone = clamp(t->p[P_E4], 0, 127), drive = clamp(t->p[P_E5], 0, 127);
-    int32_t snap = clamp(t->p[P_E6], 0, 127), tune = (clamp(t->p[P_E1], -64, 63) * 24 * 16) / 64;
-    int32_t pe = (((v->s[1] * clamp(t->p[P_E3], 0, 127)) >> 7) * (KIT_PE[ty] * 768 / 24)) >> 15;
+    kit_p_t q;
+    int32_t semi, ty = kit_ty(t, v, &semi), tone, drive, snap, tune, pe;
+    kit_pp(t, &q);
+    tone = q.tone; drive = q.drive; snap = q.snap; tune = (q.tune * 24 * 16) / 64;
+    pe = (((v->s[1] * q.pe) >> 7) * (KIT_PE[ty] * 768 / 24)) >> 15;
     int32_t p16 = (int32_t)KIT_BASE[ty] * 16 + semi * 16 + tune + pe, gain = 32768 + drive * 2048, sng;
     uint32_t inc = pitch_inc((uint32_t)clamp(p16, 0, 2047)), i;
     int32_t g_t = (127 - tone) << 8, g_n = tone << 8;
@@ -188,7 +227,7 @@ static void kit_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, co
 #define KP(nm, ty, tn, dc, pe, to, dr, sn, ho) \
     {nm, {ty, tn, dc, pe, to, dr, sn, ho}, {0, 60, 127, 60}, 0, 0, FX(0, 0, 0, 0), PAT(0)}
 static const preset_t KIT_PRESETS[] = {
-    KP("GM KIT", K_KITMODE, 0, 50, 40, 25, 0, 0, 0),
+    KP("GM KIT", K_KITMODE, K_BD, K_SD, K_CP, K_CH, K_HTOM, K_CRASH, 0),
     KP("BD", K_BD, 0, 50, 80, 0, 20, 30, 0),   KP("SD", K_SD, 0, 40, 20, 70, 10, 20, 0),
     KP("CH", K_CH, 0, 20, 0, 20, 0, 0, 0),     KP("OH", K_OH, 0, 70, 0, 20, 0, 0, 0),
     KP("CP", K_CP, 0, 50, 0, 0, 0, 0, 0),      KP("RIM", K_RIM, 0, 20, 20, 0, 0, 30, 0),
@@ -218,4 +257,5 @@ static const engine_t ENG_KIT = {
     .oneshot = 1,
     .amp = kit_amp,
     .keys = kit_keys,
+    .desc = kit_desc,
 };
