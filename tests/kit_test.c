@@ -51,21 +51,21 @@ int main(void)
 {
     int n, k, worst_len = 0, worst_peak = 0, bad = 0;
     track_t *t = &trk[0];
-    long zc_ty[8] = {0};
+    long zc_ty[K_NTYPE] = {0};
     for (n = 0; n < 40000; n++) {
         int32_t peak, zc, len;
         for (k = 0; k < 8; k++) t->p[P_E0 + k] = (int16_t)(rnd() % 128);
         t->p[P_E1] = (int16_t)((int32_t)(rnd() % 128) - 64);
-        t->p[P_E0] = n % 8;
-        if (n < 8) { for (k = 1; k < 8; k++) t->p[P_E0 + k] = ENG_KIT.edit[k].def; t->p[P_E7] = 0; }
+        t->p[P_E0] = n % K_NTYPE;
+        if (n < K_NTYPE) { for (k = 1; k < 8; k++) t->p[P_E0 + k] = ENG_KIT.edit[k].def; t->p[P_E7] = 0; }
         len = hit(t, &peak, &zc);
         if (len >= 20000) { bad++; printf("never ends: ty=%d dc=%d\n", t->p[P_E0], t->p[P_E2]); }
         if (len > worst_len) worst_len = len;
         if (peak > worst_peak) worst_peak = peak;
         if (peak > 32767) { bad++; if (bad < 5) printf("peak %d > 32767 ty=%d\n", peak, t->p[P_E0]); }
-        if (n < 8) zc_ty[n] = zc;
+        if (n < K_NTYPE) zc_ty[n] = zc;
     }
-    for (k = 0; k < 8; k++) printf("type %s default: zero-crossings %ld\n", N_KIT_TYPE[k], zc_ty[k]);
+    for (k = 0; k < K_NTYPE; k++) printf("type %s default: zero-crossings %ld\n", N_KIT_TYPE[k], zc_ty[k]);
     /* cost: 8 voices of the dearest type for 1 s */
     {
         voice_t vs[8]; int32_t out[CTL]; clock_t c0; int b, j; vmod_t m;
