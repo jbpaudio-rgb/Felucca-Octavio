@@ -17,19 +17,22 @@ static track_t trk[NPART];
 #include "../src/dsp.c"
 static int32_t lane_lv = 127;
 #define KIT_LANE_LEVEL(t, lane) lane_lv
+static int32_t snd_dc = 50, snd_tune = 0;
+#define KIT_LANE_SND(t, lane, k, def) ((k) == 1 ? snd_dc : (k) == 0 ? snd_tune : (def))
 #include "../src/eng_kit.c"
 
 static uint32_t rs = 12345;
 static uint32_t rnd(void) { rs = rs * 1664525u + 1013904223u; return rs >> 8; }
 
 /* returns blocks the hit lasted (cap 20000), writes peak of one voice and the max step */
+static int fixed_note = -1;
 static int hit(track_t *t, int32_t *peak, int32_t *zc)
 {
     voice_t *v = &t->v[0];
     int32_t out[CTL], prev = 0;
     int b, i;
     memset(v, 0, sizeof *v);
-    v->note = (uint8_t)(rnd() % 128); v->vel = 100; v->gate = 1; v->active = 1; v->stage = 1; v->age = rnd();
+    v->note = fixed_note >= 0 ? (uint8_t)fixed_note : (uint8_t)(rnd() % 128); v->vel = 100; v->gate = 1; v->active = 1; v->stage = 1; v->age = rnd();
     v->pitch16 = v->pitch_cur = v->note * 16;
     ENG_KIT.note_on(t, v);
     *peak = 0; *zc = 0;
@@ -102,6 +105,19 @@ int main(void)
         lane_lv = 127; (void)v;
         printf("mixer: BD peak %d at 100%%, %d at 0%%\n", pk100, pk0);
         if (pk0 != 0 || pk100 < 1000) { bad++; printf("mixer lane level failed\n"); }
+    }
+    /* per-lane sound in KIT mode: DECAY changes the length of a note of that lane, TUNE its pitch */
+    {
+        int32_t pk, zc1, zc2, n1, n2;
+        t->p[P_E0] = K_KITMODE; for (k = 1; k < 8; k++) t->p[P_E0 + k] = ENG_KIT.desc(t, k) ? ENG_KIT.desc(t, k)->def : 0;
+        t->p[P_E7] = 0; fixed_note = 36;
+        snd_dc = 20; n1 = hit(t, &pk, &zc1);
+        snd_dc = 100; n2 = hit(t, &pk, &zc1);
+        snd_dc = 50;
+        snd_tune = 0; (void)hit(t, &pk, &zc1);
+        snd_tune = 24; (void)hit(t, &pk, &zc2); snd_tune = 0; fixed_note = -1;
+        printf("lane sound: decay 20 -> %d blocks, 100 -> %d; zero crossings %d -> %d at TUNE +24\n", n1, n2, zc1, zc2);
+        if (n2 <= n1 || zc2 <= zc1) { bad++; printf("lane sound failed\n"); }
     }
     /* cost: 8 voices of the dearest type for 1 s */
     {

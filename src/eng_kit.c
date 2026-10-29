@@ -14,6 +14,11 @@
 /* The mixer: six lanes. The host may provide KIT_LANE_LEVEL(t, lane) (0..127, 127 = as designed, square law) from
  * parameters of its own; without it every lane plays at 100 %. Lanes: 0 BD, 1 SD + RIM, 2 CP, 3 CH + OH,
  * 4 HTOM + LTOM, 5 CRSH + RIDE + COWB + CLAV */
+/* Each lane's own sound in KIT mode: the host may provide KIT_LANE_SND(t, lane, k, def), k = 0 TUNE, 1 DECAY, 2 TONE,
+ * 3 PENV (as the EDIT knobs of a fixed TYPE, def when the host has none) */
+#ifndef KIT_LANE_SND
+#define KIT_LANE_SND(t, lane, k, def) (def)
+#endif
 #ifndef KIT_LANE_LEVEL
 #define KIT_LANE_LEVEL(t, lane) 127
 #endif
@@ -56,10 +61,11 @@ static const param_desc_t *kit_desc(const struct track *t, uint32_t k)
     return k >= 1u && k <= 6u ? &KIT_LT_DESC[k - 1u] : k == 7u ? &KIT_DRV_DESC : 0;
 }
 typedef struct { int32_t tune, dc, pe, tone, drive, snap, hold; } kit_p_t;
-static void kit_pp(const struct track *t, kit_p_t *q)        /* the sound's values: the knobs, or fixed ones in KIT mode */
+static void kit_pp(const struct track *t, int32_t lane, kit_p_t *q)        /* the sound's values: the knobs, or fixed ones in KIT mode */
 {
     if (clamp(t->p[P_E0], 0, K_KITMODE) == K_KITMODE) {
-        q->tune = 0; q->dc = 50; q->pe = 64; q->tone = 30; q->drive = clamp(t->p[P_E7], 0, 127); q->snap = 10; q->hold = 0;
+        q->tune = clamp(KIT_LANE_SND(t, lane, 0, 0), -64, 63); q->dc = clamp(KIT_LANE_SND(t, lane, 1, 50), 0, 127);
+        q->pe = clamp(KIT_LANE_SND(t, lane, 3, 64), 0, 127); q->tone = clamp(KIT_LANE_SND(t, lane, 2, 30), 0, 127); q->drive = clamp(t->p[P_E7], 0, 127); q->snap = 10; q->hold = 0;
         return;
     }
     q->tune = clamp(t->p[P_E1], -64, 63); q->dc = clamp(t->p[P_E2], 0, 127); q->pe = clamp(t->p[P_E3], 0, 127);
@@ -68,6 +74,13 @@ static void kit_pp(const struct track *t, kit_p_t *q)        /* the sound's valu
 }
 
 /* the drum a voice plays and its tuning offset (semitones) */
+static int32_t kit_lane_of(const struct track *t, const voice_t *v)   /* the lane (mixer strip) a voice plays on */
+{
+    int32_t ty = clamp(t->p[P_E0], 0, K_KITMODE), n = v->note;
+    if (ty < K_KITMODE)
+        return KIT_LANE[ty];
+    return KIT_LANE[n >= 35 && n <= 81 ? KIT_GM[n - 35][0] : n % 12];
+}
 static int32_t kit_ty(const struct track *t, const voice_t *v, int32_t *semi)
 {
     int32_t ty = clamp(t->p[P_E0], 0, K_KITMODE), n = v->note, nt, lane, sel;
@@ -113,7 +126,7 @@ static void kit_note_on(struct track *t, voice_t *v)
         }
     }
     v->s[2] = (int32_t)(seed ? seed : 1u);
-    kit_pp(t, &q);
+    kit_pp(t, kit_lane_of(t, v), &q);
     v->s[3] = (q.hold * 40) / 127;
     v->s[4] = v->s[5] = v->s[6] = 0;
     v->s[7] = 32767;
@@ -124,7 +137,7 @@ static int32_t kit_amp(struct track *t, voice_t *v, int32_t adsr)
 {
     int32_t semi, ty = kit_ty(t, v, &semi), dc, tau, a;
     kit_p_t q;
-    kit_pp(t, &q);
+    kit_pp(t, kit_lane_of(t, v), &q);
     dc = q.dc;
     (void)adsr;
     if (ty == K_CP)
@@ -155,7 +168,7 @@ static void kit_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, co
 {
     kit_p_t q;
     int32_t semi, ty = kit_ty(t, v, &semi), tone, drive, snap, tune, pe;
-    kit_pp(t, &q);
+    kit_pp(t, kit_lane_of(t, v), &q);
     tone = q.tone; drive = q.drive; snap = q.snap; tune = (q.tune * 24 * 16) / 64;
     pe = (((v->s[1] * q.pe) >> 7) * (KIT_PE[ty] * 768 / 24)) >> 15;
     int32_t p16 = (int32_t)KIT_BASE[ty] * 16 + semi * 16 + tune + pe, gain = 32768 + drive * 2048, sng;
